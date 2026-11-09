@@ -1,0 +1,90 @@
+# DSH Linux native 引擎的 Debian 12 构建环境（glibc 2.36 目标）
+#
+# 背景：云 DSH 沙盒是 python:3.12-slim-bookworm（Debian 12 / glibc 2.36）。
+# 用 Ubuntu 24.04 编出的引擎需要 GLIBC_2.38，kit 会按 prebuilds.json 的
+# glibcMinimum 拒绝加载并回退 wasm（1.2GB，1GiB 沙盒必 OOM）。
+# 在 bookworm 上编出的引擎 glibcMinimum = 2.35，可在沙盒内直接使用。
+#
+# 用法：
+#   docker build -f Dockerfile.dsh-builder -t lokit-builder:bookworm12 .
+#   docker run --rm -v /path/to/libreoffice-kit:/src -w /src --user 1000:1000 \
+#     -e HOME=/tmp -e CC=clang-19 -e CXX=clang++-19 \
+#     -e CC_FOR_BUILD=clang-19 -e CXX_FOR_BUILD=clang++-19 \
+#     lokit-builder:bookworm12 bash -c 'git config --global --add safe.directory "*"; \
+#       node scripts/build-native.mjs --platform linux-arm64-glibc --jobs 12 \
+#         --build /src/.build/native-linux-arm64-glibc-bb --tarballs /src/.build/tarballs'
+#
+# 注意：
+# - LibreOffice 26.8 要求 clang >= 18；bookworm 的 clang-19 满足，clang-16 不满足。
+# - build 侧（构建工具）默认用 gcc-12，会被 configure 拒绝（要求 GCC >= 13），
+#   所以必须同时把 CC_FOR_BUILD/CXX_FOR_BUILD 指向 clang-19。
+# - 镜像自带 node 18 不够（构建脚本要求 >=22），这里安装 Node 22.22.0。
+FROM python:3.12-slim-bookworm
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    adduser apt-transport-https autoconf automake autotools-dev base-passwd binutils  \
+    binutils-aarch64-linux-gnu binutils-common bison bsdutils build-essential bzip2 ca-certificates  \
+    clang clang-13 clang-13-doc clang-13-examples clang-14 clang-16 clang-19 cmake cmake-data  \
+    comerr-dev cpp cpp-12 curl debian-archive-keyring debianutils diffutils dirmngr dpkg-dev  \
+    e2fsprogs file findutils flex fontconfig-config fonts-dejavu-core fonts-mathjax g++ g++-12 gcc  \
+    gcc-12 gcc-12-base gettext gettext-base gir1.2-freedesktop gir1.2-glib-2.0 gir1.2-harfbuzz-0.0  \
+    git git-man gnupg gnupg-l10n gnupg-utils gperf gpg gpg-agent gpg-wks-client gpg-wks-server  \
+    gpgconf gpgsm hostname icu-devtools libacl1 libacl1-dev libapt-pkg6.0 libarchive-dev  \
+    libarchive13 libasan8 libassuan-dev libassuan0 libatomic1 libattr1 libattr1-dev libaudit-common  \
+    libaudit1 libavahi-client3 libavahi-common-data libavahi-common3 libbinutils libblkid-dev  \
+    libblkid1 libboost-dev libboost1.74-dev libbrotli-dev libbrotli1 libbsd0 libbz2-1.0 libbz2-dev  \
+    libc-ares2 libc-dev-bin libc6-dev libcairo-gobject2 libcairo-script-interpreter2 libcairo2  \
+    libcairo2-dev libcap-ng0 libcap2 libcc1-0 libclang-13-dev libclang-14-dev  \
+    libclang-common-13-dev libclang-common-14-dev libclang-common-16-dev libclang-common-19-dev  \
+    libclang-cpp13 libclang-cpp14 libclang-cpp16 libclang-cpp19 libclang-dev libclang1-13  \
+    libclang1-14 libclang1-16 libclang1-19 libclucene-contribs1v5 libclucene-core1v5 libclucene-dev  \
+    libcom-err2 libcrypt-dev libcrypt1 libctf-nobfd0 libctf0 libcups2 libcups2-dev libcupsimage2  \
+    libcupsimage2-dev libcurl3-gnutls libcurl3-nss libcurl4 libcurl4-openssl-dev libdb5.3  \
+    libdbus-1-3 libdbus-1-dev libdebconfclient0 libdeflate-dev libdeflate0 libdpkg-perl libedit2  \
+    libelf1 liberror-perl libexpat1 libexpat1-dev libext2fs-dev libext2fs2 libffi-dev libffi8  \
+    libfontconfig-dev libfontconfig1 libfontconfig1-dev libfreetype-dev libfreetype6 libgc1  \
+    libgcc-12-dev libgcrypt20 libgdbm-compat4 libgdbm6 libgirepository-1.0-1 libglib2.0-0  \
+    libglib2.0-bin libglib2.0-data libglib2.0-dev libglib2.0-dev-bin libgmp-dev libgmp10  \
+    libgmpxx4ldbl libgnutls30 libgomp1 libgpg-error-dev libgpg-error0 libgpgme-dev libgpgme11  \
+    libgprofng0 libgraphite2-3 libgraphite2-dev libgssapi-krb5-2 libharfbuzz-dev  \
+    libharfbuzz-gobject0 libharfbuzz-icu0 libharfbuzz-subset0 libharfbuzz0b libhogweed6 libhwasan0  \
+    libice-dev libice6 libicu-dev libicu72 libidn2-0 libisl23 libitm1 libjansson4 libjbig-dev  \
+    libjbig0 libjpeg-dev libjpeg62-turbo libjpeg62-turbo-dev libjs-jquery libjs-mathjax  \
+    libjs-sphinxdoc libjs-underscore libjsoncpp25 libk5crypto3 libkeyutils1 libkrb5-3  \
+    libkrb5support0 libksba8 libldap-2.5-0 libldap-common liblerc-dev liblerc4 libllvm13 libllvm14  \
+    libllvm16 libllvm19 liblsan0 liblz4-1 liblz4-dev liblzma-dev liblzma5 liblzo2-2 libmagic-mgc  \
+    libmagic1 libmd0 libmount-dev libmount1 libmpc3 libmpfr6 libncursesw6 libnettle8 libnghttp2-14  \
+    libnode108 libnpth0 libnsl-dev libnsl2 libnspr4 libnss3 libobjc-12-dev libobjc4 libp11-kit0  \
+    libpam-modules libpam-modules-bin libpam-runtime libpam0g libpam0g-dev libpcre2-16-0  \
+    libpcre2-32-0 libpcre2-8-0 libpcre2-dev libpcre2-posix3 libperl5.36 libpfm4 libpixman-1-0  \
+    libpixman-1-dev libpkgconf3 libpng-dev libpng16-16 libproc2-0 libpsl5 libpthread-stubs0-dev  \
+    libpython3-dev libpython3-stdlib libpython3.11 libpython3.11-dev libpython3.11-minimal  \
+    libpython3.11-stdlib libreadline8 librhash0 librtmp1 librust-clang-sys-dev librust-glob-dev  \
+    librust-libc-dev libsasl2-2 libsasl2-modules libsasl2-modules-db libseccomp2 libselinux1  \
+    libselinux1-dev libsemanage-common libsemanage2 libsepol-dev libsepol2 libsm-dev libsm6  \
+    libsmartcols1 libsqlite3-0 libss2 libssh-4 libssh2-1 libssl-dev libssl3 libstdc++-12-dev  \
+    libsystemd0 libtasn1-6 libtiff-dev libtiff6 libtiffxx6 libtinfo6 libtirpc-common libtirpc-dev  \
+    libtirpc3 libtool libtsan2 libubsan1 libudev1 libunistring2 libuuid1 libuv1 libwebp-dev  \
+    libwebp7 libwebpdemux2 libwebpmux3 libx11-6 libx11-data libx11-dev libxau-dev libxau6  \
+    libxcb-render0 libxcb-render0-dev libxcb-shm0 libxcb-shm0-dev libxcb1 libxcb1-dev libxdmcp-dev  \
+    libxdmcp6 libxext-dev libxext6 libxml2 libxml2-dev libxrender-dev libxrender1 libxslt1-dev  \
+    libxslt1.1 libxxhash0 libz3-4 libzstd-dev libzstd1 linux-libc-dev lld lld-14 lld-16 lld-19 llvm  \
+    llvm-13-linker-tools llvm-14 llvm-14-linker-tools llvm-14-runtime llvm-16-linker-tools  \
+    llvm-19-linker-tools llvm-runtime logsave m4 make media-types nasm netbase nettle-dev  \
+    ninja-build node-acorn node-busboy node-cjs-module-lexer node-undici node-xtend nodejs  \
+    nss-plugin-pem openssl patch perl perl-modules-5.36 pinentry-curses pkg-config pkgconf  \
+    pkgconf-bin procps publicsuffix python3 python3-clang-13 python3-dev python3-distutils  \
+    python3-lib2to3 python3-minimal python3-packaging python3.11 python3.11-dev python3.11-minimal  \
+    readline-common rpcsvc-proto sgml-base tzdata unzip util-linux-extra uuid-dev wget x11-common  \
+    x11proto-core-dev x11proto-dev xml-core xorg-sgml-doctools xtrans-dev xz-utils yasm zip  \
+    zlib1g-dev  \
+    && rm -rf /var/lib/apt/lists/*
+
+# Node 22：构建脚本要求 >=22
+RUN curl -fsSL -o /tmp/node.tar.xz https://nodejs.org/dist/v22.22.0/node-v22.22.0-linux-arm64.tar.xz \
+    && tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 \
+    && rm /tmp/node.tar.xz
+
+WORKDIR /src

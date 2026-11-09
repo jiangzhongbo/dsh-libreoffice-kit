@@ -1,0 +1,19 @@
+--- a/external/fontconfig/ExternalPackage_fontconfig.mk
++++ b/external/fontconfig/ExternalPackage_fontconfig.mk
+@@ -11,12 +11,14 @@
+ 
+ $(eval $(call gb_ExternalPackage_use_external_project,fontconfig,fontconfig))
+ 
+-ifeq ($(DISABLE_DYNLOADING),)
++# A static Core on Linux still links against the bundled shared fontconfig, so
++# install it there unconditionally. macOS keeps the previous behaviour.
+ ifeq ($(OS),MACOSX)
++ifeq ($(DISABLE_DYNLOADING),)
+ $(eval $(call gb_ExternalPackage_add_file,fontconfig,$(LIBO_LIB_FOLDER)/libfontconfig.1.dylib,src/.libs/libfontconfig.1.dylib))
++endif
+ else
+ $(eval $(call gb_ExternalPackage_add_file,fontconfig,$(LIBO_LIB_FOLDER)/libfontconfig-lo.so.1.16.1,src/.libs/libfontconfig-lo.so.1.16.1))
+ endif
+-endif
+ 
+ # vim: set noet sw=4 ts=4:
